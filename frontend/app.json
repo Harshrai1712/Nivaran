@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "SmokeDetector",
+    "slug": "smoke-detector",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#6C63FF"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.edpproject.smokedetector",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#6C63FF"
+      },
+      "package": "com.edpproject.smokedetector"
+    },
+    "web": {},
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "d815a19f-f130-4bed-9fd2-aab0d4954adb"
+      }
+    }
+  }
+}
