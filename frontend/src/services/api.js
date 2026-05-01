@@ -4,7 +4,9 @@ import axios from 'axios';
 // For Android Emulator: http://10.0.2.2:5000
 // For iOS Simulator: http://localhost:5000
 // For physical device: http://YOUR_COMPUTER_IP:5000
-const API_BASE_URL = 'http://10.15.108.17:5000';
+
+// const API_BASE_URL = 'http://10.15.108.17:5000';
+const API_BASE_URL = 'https://nivaran-n0fi.onrender.com';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
