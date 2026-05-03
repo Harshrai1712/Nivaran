@@ -1,4 +1,4 @@
-# 🚭 SmokeGuard — Cigarette Detecting Wristband System
+# 🚭 Nirvana — Cigarette Detecting Wristband System
 
 A full-stack IoT health tracking mobile application for detecting and monitoring cigarette smoking via a smart wristband. Built as a Final Year EDP Project.
 
@@ -29,7 +29,7 @@ The app features a modern health-tracking UI with:
 ## 📁 Project Structure
 
 ```
-Smoke_Detector/
+Nirvana/
 ├── backend/                    # Express API server
 │   ├── config/firebase.js      # Firebase Admin SDK
 │   ├── controllers/            # Route handlers
@@ -52,7 +52,6 @@ Smoke_Detector/
 │
 └── README.md
 ```
-
 ---
 
 ## 🚀 Setup Instructions
