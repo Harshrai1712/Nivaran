@@ -10,7 +10,7 @@ const API_BASE_URL = 'https://nivaran-n0fi.onrender.com';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000, // 60s — Render free tier needs ~30-50s to wake from sleep
   headers: {
     'Content-Type': 'application/json',
   },
