@@ -1,20 +1,89 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { shadows, borderRadius, spacing } from '../theme/typography';
+import api from '../services/api';
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [profileStats, setProfileStats] = useState({
+    daysTracked: 0,
+    avgCigarettes: 0,
+    bestStreak: 0,
+    avgHeartRate: 0,
+  });
+
+  useEffect(() => {
+    fetchProfileStats();
+  }, []);
+
+  const fetchProfileStats = async () => {
+    try {
+      // Fetch today + weekly data in parallel
+      const [todayRes, weeklyRes] = await Promise.allSettled([
+        api.get('/data/today'),
+        api.get('/data/weekly'),
+      ]);
+
+      let avgCigarettes = 0;
+      let avgHeartRate = 0;
+      let daysTracked = 0;
+      let bestStreak = 0;
+
+      // Weekly data for avg cigarettes, days tracked, streak
+      if (weeklyRes.status === 'fulfilled' && weeklyRes.value.data.success) {
+        const { days, summary } = weeklyRes.value.data.data;
+        avgCigarettes = summary.avgCigarettesPerDay || 0;
+        avgHeartRate = summary.avgHeartRate || 0;
+        daysTracked = days.filter((d) => d.totalCigarettes > 0 || d.avgHeartRate > 0).length;
+
+        // Calculate best streak: consecutive days with cigarettes < dailyLimit
+        const dailyLimit = user?.dailyLimit || 5;
+        let currentStreak = 0;
+        let maxStreak = 0;
+        [...days].reverse().forEach((d) => {
+          if (d.totalCigarettes < dailyLimit) {
+            currentStreak++;
+            maxStreak = Math.max(maxStreak, currentStreak);
+          } else {
+            currentStreak = 0;
+          }
+        });
+        bestStreak = maxStreak;
+      }
+
+      // Today's heart rate (more accurate if available)
+      if (todayRes.status === 'fulfilled' && todayRes.value.data.success) {
+        const today = todayRes.value.data.data;
+        if (today.heartRate?.average > 0) {
+          avgHeartRate = today.heartRate.average;
+        }
+      }
+
+      setProfileStats({
+        daysTracked,
+        avgCigarettes: Math.round(avgCigarettes * 10) / 10,
+        bestStreak,
+        avgHeartRate,
+      });
+    } catch (err) {
+      console.log('Profile stats fetch error:', err.message);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
 
   const stats = [
-    { icon: '📅', label: 'Days Tracked', value: '30' },
-    { icon: '🚬', label: 'Avg Cigarettes', value: '3.2' },
-    { icon: '💚', label: 'Best Streak', value: '5 days' },
-    { icon: '❤️', label: 'Avg Heart Rate', value: '76 BPM' },
+    { icon: '📅', label: 'Days Tracked', value: statsLoading ? '…' : String(profileStats.daysTracked) },
+    { icon: '🚬', label: 'Avg Cigarettes', value: statsLoading ? '…' : String(profileStats.avgCigarettes) },
+    { icon: '💚', label: 'Best Streak', value: statsLoading ? '…' : `${profileStats.bestStreak} days` },
+    { icon: '❤️', label: 'Avg Heart Rate', value: statsLoading ? '…' : profileStats.avgHeartRate > 0 ? `${profileStats.avgHeartRate} BPM` : '--' },
   ];
+
 
   const achievements = [
     { icon: '🌟', title: 'First Day', desc: 'Completed your first day' },

@@ -5,6 +5,7 @@ const {
   getMotivationalMessage,
   aggregateByHour,
 } = require('../utils/statusCalculator');
+const { getCigaretteStats, getLatestMaxHR } = require('../utils/sensorProcessor');
 
 /**
  * POST /data/add
@@ -57,6 +58,8 @@ const addData = async (req, res) => {
 /**
  * GET /data/today
  * Get today's aggregated health data
+ * — Cigarette count comes from processed cigaretteStats (sensor-derived)
+ * — Heart rate still comes from manual healthLogs
  */
 const getTodayData = async (req, res) => {
   try {
@@ -64,7 +67,15 @@ const getTodayData = async (req, res) => {
     const db = getDatabase();
     const today = new Date().toISOString().split('T')[0];
 
-    // Get today's logs
+    // ── Cigarette count from processed sensor stats ──────────────
+    const stats = await getCigaretteStats(db, userId);
+    const totalCigarettes = stats.daily[today] || 0;
+
+    // ── Heart rate: max HR from sensor window (last 10 min) ──────
+    // getLatestMaxHR queries the last 10 min; falls back to last 20 entries
+    const sensorMaxHR = await getLatestMaxHR(db);
+
+    // ── Also read manual healthLogs for any manual heart-rate entries ─
     const logsSnapshot = await db.ref(`healthLogs/${userId}/${today}`).once('value');
     const logs = logsSnapshot.val();
 
@@ -72,33 +83,36 @@ const getTodayData = async (req, res) => {
     const userSnapshot = await db.ref(`users/${userId}/dailyLimit`).once('value');
     const dailyLimit = userSnapshot.val() || 5;
 
-    // Calculate aggregates
-    let totalCigarettes = 0;
-    let heartRates = [];
-    let latestHeartRate = 0;
-
+    // Manual log heart rates (kept as fallback)
+    let manualHRValues = [];
     if (logs) {
       Object.values(logs).forEach((log) => {
-        totalCigarettes += log.cigaretteCount || 0;
-        if (log.heartRate) {
-          heartRates.push(log.heartRate);
-          latestHeartRate = log.heartRate;
-        }
+        if (log.heartRate) manualHRValues.push(log.heartRate);
       });
     }
 
-    const avgHeartRate =
-      heartRates.length > 0
-        ? Math.round(heartRates.reduce((a, b) => a + b, 0) / heartRates.length)
+    // Prefer sensor HR; fall back to manual logs
+    const currentHR = sensorMaxHR > 0
+      ? sensorMaxHR
+      : manualHRValues.length > 0 ? Math.max(...manualHRValues) : 0;
+
+    const avgHeartRate = sensorMaxHR > 0
+      ? sensorMaxHR
+      : manualHRValues.length > 0
+        ? Math.round(manualHRValues.reduce((a, b) => a + b, 0) / manualHRValues.length)
         : 0;
-    const maxHeartRate = heartRates.length > 0 ? Math.max(...heartRates) : 0;
-    const minHeartRate = heartRates.length > 0 ? Math.min(...heartRates) : 0;
+
+    const maxHeartRate = sensorMaxHR > 0
+      ? sensorMaxHR
+      : manualHRValues.length > 0 ? Math.max(...manualHRValues) : 0;
+
+    const minHeartRate = manualHRValues.length > 0 ? Math.min(...manualHRValues) : 0;
 
     const smokingStatus = calculateStatus(totalCigarettes, dailyLimit);
-    const heartRateStatus = getHeartRateStatus(latestHeartRate || avgHeartRate);
+    const heartRateStatus = getHeartRateStatus(currentHR);
     const motivation = getMotivationalMessage(smokingStatus.status);
 
-    // Get hourly breakdown
+    // Hourly breakdown from manual logs
     const hourlyData = aggregateByHour(logs);
 
     res.json({
@@ -109,7 +123,7 @@ const getTodayData = async (req, res) => {
         dailyLimit,
         smokingStatus,
         heartRate: {
-          current: latestHeartRate,
+          current: currentHR,
           average: avgHeartRate,
           max: maxHeartRate,
           min: minHeartRate,
@@ -147,7 +161,11 @@ const getDateData = async (req, res) => {
       });
     }
 
-    // Get logs for the date
+    // ── Cigarette count from processed sensor stats ──────────────
+    const stats = await getCigaretteStats(db, userId);
+    const totalCigarettes = stats.daily[date] || 0;
+
+    // ── Heart rate from manual healthLogs ─────────────────────────
     const logsSnapshot = await db.ref(`healthLogs/${userId}/${date}`).once('value');
     const logs = logsSnapshot.val();
 
@@ -155,13 +173,10 @@ const getDateData = async (req, res) => {
     const userSnapshot = await db.ref(`users/${userId}/dailyLimit`).once('value');
     const dailyLimit = userSnapshot.val() || 5;
 
-    // Calculate aggregates
-    let totalCigarettes = 0;
     let heartRates = [];
 
     if (logs) {
       Object.values(logs).forEach((log) => {
-        totalCigarettes += log.cigaretteCount || 0;
         if (log.heartRate) {
           heartRates.push(log.heartRate);
         }
@@ -218,36 +233,55 @@ const getMonthData = async (req, res) => {
     const userSnapshot = await db.ref(`users/${userId}/dailyLimit`).once('value');
     const dailyLimit = userSnapshot.val() || 5;
 
-    // Get all health logs for the user
-    const logsSnapshot = await db.ref(`healthLogs/${userId}`).once('value');
-    const allLogs = logsSnapshot.val() || {};
+    // ── Cigarette counts from processed sensor stats ─────────────
+    const stats = await getCigaretteStats(db, userId);
+    const dailyCounts = stats.daily || {};
 
-    // Filter and aggregate by date for the requested month
-    const monthSummary = {};
+    // ── Heart rates from SENSOR data (grouped by date) ────────────
+    // healthLogs are never populated in sensor-driven mode, so we
+    // read HR directly from the /sensors node and group by date.
+    const sensorsSnap = await db.ref('sensors').once('value');
+    const allSensors = sensorsSnap.val() || {};
 
-    Object.keys(allLogs).forEach((dateKey) => {
-      if (dateKey.startsWith(month)) {
-        const dayLogs = allLogs[dateKey];
-        let totalCigarettes = 0;
-        let heartRates = [];
-
-        Object.values(dayLogs).forEach((log) => {
-          totalCigarettes += log.cigaretteCount || 0;
-          if (log.heartRate) heartRates.push(log.heartRate);
-        });
-
-        const avgHeartRate =
-          heartRates.length > 0
-            ? Math.round(heartRates.reduce((a, b) => a + b, 0) / heartRates.length)
-            : 0;
-
-        monthSummary[dateKey] = {
-          totalCigarettes,
-          avgHeartRate,
-          status: calculateStatus(totalCigarettes, dailyLimit),
-        };
+    const sensorDailyHR = {}; // { "YYYY-MM-DD": [hr, hr, ...] }
+    Object.values(allSensors).forEach((entry) => {
+      const raw = entry.timestamp ?? entry.Timestamp;
+      if (!raw) return;
+      const ms = new Date(raw).getTime();
+      if (isNaN(ms)) return;
+      const dk = new Date(ms).toISOString().split('T')[0];
+      const hr = Number(entry.HR ?? entry.hr ?? entry.heartRate ?? 0);
+      if (hr > 0) {
+        if (!sensorDailyHR[dk]) sensorDailyHR[dk] = [];
+        sensorDailyHR[dk].push(hr);
       }
     });
+
+    // ── Include ALL days of the month up to today ─────────────────
+    // Without this, smoke-free days (0 cigarettes, no logs) are
+    // silently omitted and the frontend can't count them.
+    const [year, mon] = month.split('-').map(Number);
+    const today = now.toISOString().split('T')[0];
+    const daysInMonth = new Date(year, mon, 0).getDate(); // total days in this month
+
+    const monthSummary = {};
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dk = `${month}-${String(d).padStart(2, '0')}`;
+      if (dk > today) break; // don't include future days
+
+      const totalCigarettes = dailyCounts[dk] || 0;
+      const hrValues = sensorDailyHR[dk] || [];
+      const avgHeartRate =
+        hrValues.length > 0
+          ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length)
+          : 0;
+
+      monthSummary[dk] = {
+        totalCigarettes,
+        avgHeartRate,
+        status: calculateStatus(totalCigarettes, dailyLimit),
+      };
+    }
 
     res.json({
       success: true,
@@ -286,22 +320,38 @@ const getWeeklyData = async (req, res) => {
       days.push(d.toISOString().split('T')[0]);
     }
 
-    const logsSnapshot = await db.ref(`healthLogs/${userId}`).once('value');
-    const allLogs = logsSnapshot.val() || {};
+    // ── Cigarette counts from processed sensor stats ─────────────
+    const stats = await getCigaretteStats(db, userId);
+    const dailyCounts = stats.daily || {};
+
+    // ── Heart rates from SENSOR data (grouped by date) ────────────
+    // healthLogs are never populated in sensor-driven mode, so we
+    // read HR directly from the /sensors node and group by date.
+    const sensorsSnap = await db.ref('sensors').once('value');
+    const allSensors = sensorsSnap.val() || {};
+
+    const sensorDailyHR = {}; // { "YYYY-MM-DD": [hr, hr, ...] }
+    Object.values(allSensors).forEach((entry) => {
+      const raw = entry.timestamp ?? entry.Timestamp;
+      if (!raw) return;
+      const ms = new Date(raw).getTime();
+      if (isNaN(ms)) return;
+      const dk = new Date(ms).toISOString().split('T')[0];
+      const hr = Number(entry.HR ?? entry.hr ?? entry.heartRate ?? 0);
+      if (hr > 0) {
+        if (!sensorDailyHR[dk]) sensorDailyHR[dk] = [];
+        sensorDailyHR[dk].push(hr);
+      }
+    });
 
     const weeklyData = days.map((dateKey) => {
-      const dayLogs = allLogs[dateKey] || {};
-      let totalCigarettes = 0;
-      let heartRates = [];
+      const totalCigarettes = dailyCounts[dateKey] || 0;
 
-      Object.values(dayLogs).forEach((log) => {
-        totalCigarettes += log.cigaretteCount || 0;
-        if (log.heartRate) heartRates.push(log.heartRate);
-      });
-
+      // Per-day average HR from sensor readings
+      const hrValues = sensorDailyHR[dateKey] || [];
       const avgHeartRate =
-        heartRates.length > 0
-          ? Math.round(heartRates.reduce((a, b) => a + b, 0) / heartRates.length)
+        hrValues.length > 0
+          ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length)
           : 0;
 
       return {
@@ -313,10 +363,20 @@ const getWeeklyData = async (req, res) => {
       };
     });
 
-    // Calculate weekly averages
+    // ── Weekly summary ────────────────────────────────────────────
     const totalWeekCigs = weeklyData.reduce((sum, d) => sum + d.totalCigarettes, 0);
-    const avgWeekCigs = Math.round((totalWeekCigs / 7) * 10) / 10;
-    const heartRateValues = weeklyData.filter((d) => d.avgHeartRate > 0).map((d) => d.avgHeartRate);
+
+    // Avg/Day = average on days the user ACTUALLY smoked (more meaningful)
+    const smokingDays = weeklyData.filter((d) => d.totalCigarettes > 0).length;
+    const avgWeekCigs =
+      smokingDays > 0
+        ? Math.round((totalWeekCigs / smokingDays) * 10) / 10
+        : 0;
+
+    // Avg BPM = average across days that have HR sensor readings
+    const heartRateValues = weeklyData
+      .filter((d) => d.avgHeartRate > 0)
+      .map((d) => d.avgHeartRate);
     const avgWeekHR =
       heartRateValues.length > 0
         ? Math.round(heartRateValues.reduce((a, b) => a + b, 0) / heartRateValues.length)
@@ -330,7 +390,7 @@ const getWeeklyData = async (req, res) => {
           totalCigarettes: totalWeekCigs,
           avgCigarettesPerDay: avgWeekCigs,
           avgHeartRate: avgWeekHR,
-          smokeFreedays: weeklyData.filter((d) => d.totalCigarettes === 0).length,
+          smokeFreeDays: weeklyData.filter((d) => d.totalCigarettes === 0).length,
         },
       },
     });
@@ -340,4 +400,30 @@ const getWeeklyData = async (req, res) => {
   }
 };
 
-module.exports = { addData, getTodayData, getDateData, getMonthData, getWeeklyData };
+/**
+ * GET /data/stats
+ * Return the full processed cigaretteStats for the logged-in user.
+ * Used by the frontend to fetch all daily counts at once.
+ */
+const getCigaretteStatsRaw = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const db = getDatabase();
+    const stats = await getCigaretteStats(db, userId);
+
+    res.json({
+      success: true,
+      data: {
+        userId,
+        daily: stats.daily || {},
+        totalCount: stats.totalCount || 0,
+        lastProcessedAt: stats.lastProcessedAt || null,
+      },
+    });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
+module.exports = { addData, getTodayData, getDateData, getMonthData, getWeeklyData, getCigaretteStatsRaw };

@@ -1,18 +1,30 @@
 /**
- * Calculate smoking status based on cigarette count and daily limit
- * @param {number} count - Number of cigarettes
- * @param {number} dailyLimit - User's daily limit (default 5)
- * @returns {{ status: string, color: string, level: number }}
+ * Calculate smoking status based on cigarette count relative to the user's daily limit.
+ *
+ * Thresholds are proportional to dailyLimit so the risk level scales
+ * correctly regardless of the user's personal goal:
+ *
+ *   0                      → Normal   (smoke-free)
+ *   1 – 33 % of limit      → Very Few (low risk)
+ *   34 % – 99 % of limit   → Moderate (approaching limit)
+ *   ≥ 100 % of limit       → High     (limit reached / exceeded)
+ *
+ * @param {number} count      - Number of cigarettes smoked today
+ * @param {number} dailyLimit - User's personal daily limit (default 5)
+ * @returns {{ status: string, color: string, level: number, percentage: number }}
  */
 function calculateStatus(count, dailyLimit = 5) {
+  const limit = Math.max(dailyLimit, 1); // guard against 0-limit edge case
+  const percentage = Math.round((count / limit) * 100);
+
   if (count === 0) {
-    return { status: 'Normal', color: '#00B894', level: 0 };
-  } else if (count <= 2) {
-    return { status: 'Very Few', color: '#74B9FF', level: 1 };
-  } else if (count <= 5) {
-    return { status: 'Moderate', color: '#FDCB6E', level: 2 };
+    return { status: 'Normal',   color: '#00B894', level: 0, percentage };
+  } else if (percentage <= 33) {
+    return { status: 'Very Few', color: '#74B9FF', level: 1, percentage };
+  } else if (percentage < 100) {
+    return { status: 'Moderate', color: '#FDCB6E', level: 2, percentage };
   } else {
-    return { status: 'High', color: '#E17055', level: 3 };
+    return { status: 'High',     color: '#E17055', level: 3, percentage };
   }
 }
 

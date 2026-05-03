@@ -7,6 +7,7 @@ const {
   getDateData,
   getMonthData,
   getWeeklyData,
+  getCigaretteStatsRaw,
 } = require('../controllers/dataController');
 
 // All data routes are protected
@@ -17,5 +18,6 @@ router.get('/today', getTodayData);
 router.get('/date/:date', getDateData);
 router.get('/month', getMonthData);
 router.get('/weekly', getWeeklyData);
+router.get('/stats', getCigaretteStatsRaw);
 
 module.exports = router;

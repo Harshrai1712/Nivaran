@@ -47,18 +47,23 @@ export default function AnalyticsScreen() {
               avgHeartRate: data.avgHeartRate || 0,
             }));
 
+          const totalMonthCigs = dayArray.reduce((s, d) => s + d.totalCigarettes, 0);
+          const smokingDaysInMonth = dayArray.filter((d) => d.totalCigarettes > 0).length;
+
           setWeeklyData({
             days: dayArray,
             summary: {
-              totalCigarettes: dayArray.reduce((s, d) => s + d.totalCigarettes, 0),
+              totalCigarettes: totalMonthCigs,
+              // Avg on days actually smoked (consistent with weekly view)
               avgCigarettesPerDay:
-                Math.round(
-                  (dayArray.reduce((s, d) => s + d.totalCigarettes, 0) / dayArray.length) * 10
-                ) / 10,
+                smokingDaysInMonth > 0
+                  ? Math.round((totalMonthCigs / smokingDaysInMonth) * 10) / 10
+                  : 0,
               avgHeartRate: Math.round(
                 dayArray.filter((d) => d.avgHeartRate > 0).reduce((s, d) => s + d.avgHeartRate, 0) /
                   Math.max(dayArray.filter((d) => d.avgHeartRate > 0).length, 1)
               ),
+              // Now correct: backend includes ALL days up to today, so 0-cig days are in dayArray
               smokeFreeDays: dayArray.filter((d) => d.totalCigarettes === 0).length,
             },
           });

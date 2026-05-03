@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { getStatusColor } from '../theme/colors';
@@ -7,7 +7,16 @@ import { shadows, borderRadius, spacing } from '../theme/typography';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export default function CalendarView({ monthData = {}, onDatePress, selectedDate }) {
+/**
+ * CalendarView
+ *
+ * Props:
+ *  - monthData   : { "YYYY-MM-DD": { totalCigarettes, status } }
+ *  - onDatePress : (dateKey: string) => void
+ *  - selectedDate: string | undefined
+ *  - onMonthChange: ({ year, month }) => void — called when user navigates months
+ */
+export default function CalendarView({ monthData = {}, onDatePress, selectedDate, onMonthChange }) {
   const { theme, isDarkMode } = useTheme();
   const themeKey = isDarkMode ? 'dark' : 'light';
 
@@ -23,21 +32,32 @@ export default function CalendarView({ monthData = {}, onDatePress, selectedDate
     year: 'numeric',
   });
 
+  const navigateTo = useCallback(
+    (year, month) => {
+      setCurrentYear(year);
+      setCurrentMonth(month);
+      // Notify parent so it can fetch the right month's data
+      if (onMonthChange) {
+        const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+        onMonthChange({ year, month, monthStr });
+      }
+    },
+    [onMonthChange]
+  );
+
   const goToPrevMonth = () => {
     if (currentMonth === 1) {
-      setCurrentYear(currentYear - 1);
-      setCurrentMonth(12);
+      navigateTo(currentYear - 1, 12);
     } else {
-      setCurrentMonth(currentMonth - 1);
+      navigateTo(currentYear, currentMonth - 1);
     }
   };
 
   const goToNextMonth = () => {
     if (currentMonth === 12) {
-      setCurrentYear(currentYear + 1);
-      setCurrentMonth(1);
+      navigateTo(currentYear + 1, 1);
     } else {
-      setCurrentMonth(currentMonth + 1);
+      navigateTo(currentYear, currentMonth + 1);
     }
   };
 

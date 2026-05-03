@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -17,6 +17,7 @@ import CalendarView from '../components/CalendarView';
 import HeartRateCard from '../components/HeartRateCard';
 import TodaySummaryCard from '../components/TodaySummaryCard';
 import MotivationalText from '../components/MotivationalText';
+import HealthTree from '../components/HealthTree';
 
 export default function HomeScreen({ navigation }) {
   const { theme } = useTheme();
@@ -27,32 +28,72 @@ export default function HomeScreen({ navigation }) {
   const [monthData, setMonthData] = useState({});
   const [error, setError] = useState(null);
 
+  // Track which month the calendar is currently showing
+  const now = new Date();
+  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [calendarMonth, setCalendarMonth] = useState(currentMonthStr);
+
+  // Cache of month data already fetched — avoids redundant API calls
+  const monthCache = useRef({});
+
+  /**
+   * Fetch month data for a specific YYYY-MM string.
+   * Uses an in-memory cache so navigating back to a visited month is instant.
+   */
+  const fetchMonthData = useCallback(async (monthStr) => {
+    // Return cached result if available
+    if (monthCache.current[monthStr]) {
+      setMonthData(monthCache.current[monthStr]);
+      return;
+    }
+
+    try {
+      const res = await api.get(`/data/month?month=${monthStr}`);
+      if (res.data.success) {
+        const days = res.data.data.days || {};
+        monthCache.current[monthStr] = days;
+        setMonthData(days);
+      }
+    } catch {
+      // Silently fall back — keep showing whatever was there
+      console.log(`[HomeScreen] Could not fetch month ${monthStr}, using cached/mock data`);
+    }
+  }, []);
+
+  /**
+   * Fetch today's stats and the current calendar month data.
+   */
   const fetchData = useCallback(async () => {
     try {
       setError(null);
 
-      // Try to fetch from API
       try {
         const [todayRes, monthRes] = await Promise.all([
           api.get('/data/today'),
-          api.get('/data/month'),
+          api.get(`/data/month?month=${currentMonthStr}`),
         ]);
 
         if (todayRes.data.success) {
           setTodayData(todayRes.data.data);
         }
         if (monthRes.data.success) {
-          setMonthData(monthRes.data.data.days || {});
+          const days = monthRes.data.data.days || {};
+          monthCache.current[currentMonthStr] = days;
+          // Only update the displayed month data if calendar is still on current month
+          setCalendarMonth((cm) => {
+            if (cm === currentMonthStr) setMonthData(days);
+            return cm;
+          });
         }
       } catch (apiError) {
-        // If API fails, use mock data for demo
+        // API unavailable — use mock data for demo
         console.log('Using mock data (API unavailable):', apiError.message);
-        const now = new Date();
-        const mockMonth = generateMonthMockData(now.getFullYear(), now.getMonth() + 1);
+        const nowDate = new Date();
+        const mockMonth = generateMonthMockData(nowDate.getFullYear(), nowDate.getMonth() + 1);
+        monthCache.current[currentMonthStr] = mockMonth;
         setMonthData(mockMonth);
 
-        // Generate today's mock data
-        const todayKey = now.toISOString().split('T')[0];
+        const todayKey = nowDate.toISOString().split('T')[0];
         const todayMock = mockMonth[todayKey] || { totalCigarettes: 0, avgHeartRate: 72 };
         const status = getSmokingStatus(todayMock.totalCigarettes);
 
@@ -77,13 +118,13 @@ export default function HomeScreen({ navigation }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, currentMonthStr]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Polling for simulated real-time updates (every 30 seconds)
+  // Poll every 30 seconds for fresh today's data
   useEffect(() => {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
@@ -91,6 +132,8 @@ export default function HomeScreen({ navigation }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Clear cache for current month so we get fresh data
+    delete monthCache.current[calendarMonth];
     await fetchData();
     setRefreshing(false);
   };
@@ -98,6 +141,18 @@ export default function HomeScreen({ navigation }) {
   const handleDatePress = (dateKey) => {
     navigation.navigate('DayDetail', { date: dateKey });
   };
+
+  /**
+   * Called by CalendarView when the user taps ◀ or ▶.
+   * Fetches (or loads from cache) the new month's data.
+   */
+  const handleMonthChange = useCallback(
+    ({ monthStr }) => {
+      setCalendarMonth(monthStr);
+      fetchMonthData(monthStr);
+    },
+    [fetchMonthData]
+  );
 
   if (isLoading) {
     return (
@@ -126,7 +181,11 @@ export default function HomeScreen({ navigation }) {
         }
       >
         {/* Status Banner */}
-        <StatusBanner status={smokingStatus} />
+        <StatusBanner
+          status={smokingStatus}
+          cigarettes={totalCigarettes}
+          dailyLimit={dailyLimit}
+        />
 
         {/* Welcome text */}
         <View style={styles.welcomeSection}>
@@ -149,14 +208,25 @@ export default function HomeScreen({ navigation }) {
           riskLevel={smokingStatus}
         />
 
+        {/* Health Tree */}
+        <HealthTree
+          riskLevel={smokingStatus}
+          cigarettes={totalCigarettes}
+          dailyLimit={dailyLimit}
+        />
+
         {/* Heart Rate */}
         <HeartRateCard bpm={heartRate} />
 
         {/* Motivational Text */}
         <MotivationalText status={smokingStatus} message={motivation} />
 
-        {/* Calendar */}
-        <CalendarView monthData={monthData} onDatePress={handleDatePress} />
+        {/* Calendar — now supports multi-month navigation with lazy fetch */}
+        <CalendarView
+          monthData={monthData}
+          onDatePress={handleDatePress}
+          onMonthChange={handleMonthChange}
+        />
 
         {/* Bottom spacer */}
         <View style={{ height: 100 }} />

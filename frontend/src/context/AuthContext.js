@@ -16,28 +16,28 @@ export function AuthProvider({ children }) {
 
   const loadStoredAuth = async () => {
     try {
-      // Add a 2-second timeout so it never hangs infinitely
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('AsyncStorage timeout')), 2000)
-      );
-      
-      const storedToken = await Promise.race([
-        AsyncStorage.getItem('token'),
-        timeoutPromise
-      ]);
-      
-      const storedUser = await Promise.race([
-        AsyncStorage.getItem('user'),
-        timeoutPromise
+      // 5 second timeout — enough for slow devices
+      const withTimeout = (promise) =>
+        Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('AsyncStorage timeout')), 5000)
+          ),
+        ]);
+
+      const [storedToken, storedUser] = await Promise.all([
+        withTimeout(AsyncStorage.getItem('token')),
+        withTimeout(AsyncStorage.getItem('user')),
       ]);
 
       if (storedToken && storedUser) {
+        const parsedUser = JSON.parse(storedUser);
         setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+        setUser(parsedUser);
         api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
       }
     } catch (error) {
-      console.error('Error loading auth:', error);
+      console.error('Error loading auth:', error.message);
     } finally {
       setIsLoading(false);
     }

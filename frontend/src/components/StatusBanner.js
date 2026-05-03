@@ -5,10 +5,28 @@ import { useTheme } from '../context/ThemeContext';
 import { getStatusGradient } from '../theme/colors';
 import { getStatusEmoji } from '../utils/statusHelper';
 
-export default function StatusBanner({ status = 'Normal', subtitle = "Today's Smoking Status" }) {
+export default function StatusBanner({
+  status = 'Normal',
+  subtitle = "Today's Smoking Status",
+  cigarettes = 0,
+  dailyLimit = 5,
+}) {
   const { theme } = useTheme();
   const gradientColors = getStatusGradient(status);
   const emoji = getStatusEmoji(status);
+
+  /**
+   * Build a description that reflects the actual limit, e.g.
+   * "2 of 4 cigarettes (50% of your limit)"
+   */
+  const getDescription = () => {
+    if (status === 'Normal') return 'No cigarettes detected today 🎉';
+    const pct = Math.round((cigarettes / Math.max(dailyLimit, 1)) * 100);
+    if (status === 'High') {
+      return `Limit reached! ${cigarettes}/${dailyLimit} cigarettes (${pct}%)`;
+    }
+    return `${cigarettes} of ${dailyLimit} cigarettes today (${pct}% of limit)`;
+  };
 
   return (
     <LinearGradient
@@ -23,12 +41,7 @@ export default function StatusBanner({ status = 'Normal', subtitle = "Today's Sm
           <Text style={styles.emoji}>{emoji}</Text>
           <Text style={styles.statusText}>{status}</Text>
         </View>
-        <Text style={styles.description}>
-          {status === 'Normal' && 'No cigarettes detected today'}
-          {status === 'Very Few' && '1-2 cigarettes detected'}
-          {status === 'Moderate' && '3-5 cigarettes detected'}
-          {status === 'High' && 'Limit exceeded! Take care'}
-        </Text>
+        <Text style={styles.description}>{getDescription()}</Text>
       </View>
     </LinearGradient>
   );

@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { initializeFirebase } = require('./config/firebase');
+const { startRealtimeUpdater } = require('./utils/realtimeUpdater');
 
 // Initialize Express
 const app = express();
@@ -30,7 +31,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       auth: ['/auth/register', '/auth/login', '/auth/me', '/auth/settings'],
-      data: ['/data/add', '/data/today', '/data/date/:date', '/data/month', '/data/weekly'],
+      data: ['/data/add', '/data/today', '/data/date/:date', '/data/month', '/data/weekly', '/data/stats'],
     },
   });
 });
@@ -58,6 +59,11 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📡 API: http://localhost:${PORT}`);
   console.log(`🔥 Firebase: ${process.env.FIREBASE_DATABASE_URL || 'Check configuration'}\n`);
+
+  // Start the sensor → cigarette processing pipeline
+  // Phase 1: processes ALL past sensor data (one-time)
+  // Phase 2: checks for new alarms every 10 minutes (continuous)
+  startRealtimeUpdater();
 });
 
 module.exports = app;
